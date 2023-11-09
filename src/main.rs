@@ -52,7 +52,7 @@ fn capture(genshin_hwnd: HWND) -> Result<()> {
             }
         }
     }
-    println!("截图失败");
+    println!("截图失败，请用管理员权限运行");
     Err(opencv::Error::new(1, "Capture failed"))
 }
 

@@ -1,0 +1,150 @@
+use std::thread::sleep;
+use std::time::Duration;
+
+use rand::{thread_rng, Rng};
+
+use image::RgbaImage;
+use win_screenshot::prelude::*;
+
+use windows::core::w;
+use windows::Win32::Foundation::*;
+use windows::Win32::UI::WindowsAndMessaging::{
+    FindWindowW, GetForegroundWindow, GetWindowRect, SendMessageW, SetCursorPos,
+    SetForegroundWindow, WM_LBUTTONDOWN, WM_LBUTTONUP,
+};
+
+#[allow(unused)]
+use opencv::prelude::*;
+use opencv::{core, imgcodecs, imgproc, Result};
+
+fn get_window_position(hwnd: HWND) -> Option<(i32, i32)> {
+    let mut rect = RECT::default();
+    unsafe {
+        if GetWindowRect(hwnd, &mut rect).is_ok() {
+            let x = rect.left;
+            let y = rect.top;
+            return Some((x, y));
+        }
+    }
+    None
+}
+
+fn get_genshin_hwnd() -> HWND {
+    let genshin_hwnd = unsafe { FindWindowW(None, w!("原神")) };
+    if genshin_hwnd.0 == 0 {
+        panic!("找不到原神窗口")
+    } else {
+        println!("获取原神窗口句柄: {:?}", genshin_hwnd);
+    }
+    genshin_hwnd
+}
+
+fn active_genshin_hwnd(genshin_hwnd: HWND) {
+    unsafe { SetForegroundWindow(genshin_hwnd) };
+}
+
+fn capture(genshin_hwnd: HWND) -> Result<()> {
+    if let Ok(buf) = capture_window(genshin_hwnd.0) {
+        if let Some(img) = RgbaImage::from_raw(buf.width, buf.height, buf.pixels) {
+            if img.save("screenshot.jpg").is_ok() {
+                println!("截图成功");
+                return Ok(());
+            }
+        }
+    }
+    println!("截图失败");
+    Err(opencv::Error::new(1, "Capture failed"))
+}
+
+fn match_template(target: &str, template: &str) -> Option<core::Point_<i32>> {
+    let src = imgcodecs::imread(target, imgcodecs::IMREAD_COLOR).unwrap();
+    let templ = imgcodecs::imread(template, imgcodecs::IMREAD_COLOR).unwrap();
+    let mut result = core::Mat::default();
+    let mask = core::Mat::default();
+    if imgproc::match_template(&src, &templ, &mut result, imgproc::TM_CCOEFF_NORMED, &mask).is_err()
+    {
+        return None;
+    }
+
+    let mut min_val = 0.0;
+    let mut max_val = 0.0;
+    let mut min_loc = core::Point::default();
+    let mut max_loc = core::Point::default();
+    if core::min_max_loc(
+        &result,
+        Some(&mut min_val),
+        Some(&mut max_val),
+        Some(&mut min_loc),
+        Some(&mut max_loc),
+        &mask,
+    )
+    .is_err()
+    {
+        return None;
+    }
+
+    let threshold = 0.99; // 设置阈值
+    let match_loc = if max_val > threshold {
+        max_loc
+    } else {
+        core::Point::default()
+    };
+
+    if match_loc == core::Point::default() {
+        return None;
+    }
+
+    Some(match_loc)
+}
+
+fn match_dotdotdot() -> Option<core::Point_<i32>> {
+    match_template("screenshot.jpg", "resources/2560x1440/dotdotdot.jpg")
+}
+
+fn click_dotdotdot(genshin_hwnd: HWND, point: core::Point_<i32>) -> Result<()> {
+    let mut rng = thread_rng();
+    let x = point.x + rng.gen_range(0..100);
+    let y = point.y + rng.gen_range(0..30);
+    let (x_0, y_0) = get_window_position(genshin_hwnd).unwrap();
+    let cur_hwnd: HWND = unsafe { GetForegroundWindow() };
+    let lparam = ((y << 16) | (x & 0xFFFF)) as isize;
+    unsafe {
+        // 设置原神窗口为前台窗口
+        SetForegroundWindow(genshin_hwnd);
+        // 把光标移动到按钮位置
+        SetCursorPos(x_0 + x, y_0 + y).unwrap();
+        // 按下鼠标左键
+        SendMessageW(genshin_hwnd, WM_LBUTTONDOWN, WPARAM(1), LPARAM(lparam));
+        // 等待 0.2s
+        sleep(Duration::from_millis(200));
+        // 抬起鼠标左键
+        SendMessageW(genshin_hwnd, WM_LBUTTONUP, WPARAM(1), LPARAM(lparam));
+        // 切回你在工作的窗口
+        SetForegroundWindow(cur_hwnd)
+    };
+    Ok(())
+}
+
+fn match_enter() -> Option<core::Point_<i32>> {
+    match_template("screenshot.jpg", "resources/2560x1440/enter.jpg")
+}
+
+fn main() {
+    let genshin_hwnd: HWND = get_genshin_hwnd();
+    loop {
+        if capture(genshin_hwnd).is_err() {
+            sleep(Duration::from_millis(1000));
+            continue;
+        }
+        if let Some(point) = match_dotdotdot() {
+            println!("检测到选项，正在点击");
+            click_dotdotdot(genshin_hwnd, point).unwrap();
+        } else if match_enter().is_some() {
+            active_genshin_hwnd(genshin_hwnd);
+            println!("剧情结束");
+            break;
+        }
+        println!("等待 5 秒");
+        sleep(Duration::from_millis(5000));
+    }
+}

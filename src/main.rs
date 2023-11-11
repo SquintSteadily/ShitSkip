@@ -8,10 +8,8 @@ use win_screenshot::prelude::*;
 
 use windows::core::w;
 use windows::Win32::Foundation::*;
-use windows::Win32::UI::WindowsAndMessaging::{
-    FindWindowW, GetForegroundWindow, GetWindowRect, SendMessageW, SetCursorPos,
-    SetForegroundWindow, WM_LBUTTONDOWN, WM_LBUTTONUP,
-};
+use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use windows::Win32::UI::WindowsAndMessaging::*;
 
 #[allow(unused)]
 use opencv::prelude::*;
@@ -37,10 +35,6 @@ fn get_genshin_hwnd() -> HWND {
         println!("获取原神窗口句柄: {:?}", genshin_hwnd);
     }
     genshin_hwnd
-}
-
-fn active_genshin_hwnd(genshin_hwnd: HWND) {
-    unsafe { SetForegroundWindow(genshin_hwnd) };
 }
 
 fn capture(genshin_hwnd: HWND) -> Result<()> {
@@ -83,7 +77,7 @@ fn match_template(target: &str, template: &str) -> Option<core::Point_<i32>> {
         return None;
     }
 
-    let threshold = 0.99; // 设置阈值
+    let threshold = 0.99; // 设置阈值，todo: 从配置中读取阈值
     let match_loc = if max_val > threshold {
         max_loc
     } else {
@@ -98,7 +92,13 @@ fn match_template(target: &str, template: &str) -> Option<core::Point_<i32>> {
 }
 
 fn match_dotdotdot() -> Option<core::Point_<i32>> {
+    // todo: 从配置读取
     match_template("screenshot.jpg", "resources/2560x1440/dotdotdot.jpg")
+}
+
+fn match_enter() -> Option<core::Point_<i32>> {
+    // todo: 从配置读取
+    match_template("screenshot.jpg", "resources/2560x1440/enter.jpg")
 }
 
 fn click_dotdotdot(genshin_hwnd: HWND, point: core::Point_<i32>) -> Result<()> {
@@ -106,8 +106,8 @@ fn click_dotdotdot(genshin_hwnd: HWND, point: core::Point_<i32>) -> Result<()> {
     let x = point.x + rng.gen_range(0..100);
     let y = point.y + rng.gen_range(0..30);
     let (x_0, y_0) = get_window_position(genshin_hwnd).unwrap();
-    let cur_hwnd: HWND = unsafe { GetForegroundWindow() };
-    let lparam = ((y << 16) | (x & 0xFFFF)) as isize;
+    // let cur_hwnd: HWND = unsafe { GetForegroundWindow() };
+    let lparam = ((y << 16) | (x & 0xffff)) as isize;
     unsafe {
         // 设置原神窗口为前台窗口
         SetForegroundWindow(genshin_hwnd);
@@ -116,17 +116,28 @@ fn click_dotdotdot(genshin_hwnd: HWND, point: core::Point_<i32>) -> Result<()> {
         // 按下鼠标左键
         SendMessageW(genshin_hwnd, WM_LBUTTONDOWN, WPARAM(1), LPARAM(lparam));
         // 等待 0.2s
-        sleep(Duration::from_millis(200));
+        let mut rng = thread_rng();
+        sleep(Duration::from_millis(150 + rng.gen_range(0..100)));
         // 抬起鼠标左键
         SendMessageW(genshin_hwnd, WM_LBUTTONUP, WPARAM(1), LPARAM(lparam));
-        // 切回你在工作的窗口
-        SetForegroundWindow(cur_hwnd)
     };
     Ok(())
 }
 
-fn match_enter() -> Option<core::Point_<i32>> {
-    match_template("screenshot.jpg", "resources/2560x1440/enter.jpg")
+fn press_space(genshin_hwnd: HWND) -> Result<()> {
+    unsafe {
+        // 设置原神窗口为前台窗口
+        SetForegroundWindow(genshin_hwnd);
+        // 按下 SPACE 键
+        SendMessageW(genshin_hwnd, WM_KEYDOWN, WPARAM(VK_SPACE.0 as usize), LPARAM(1));
+        // 等待 0.2s
+        let mut rng = thread_rng();
+        sleep(Duration::from_millis(150 + rng.gen_range(0..100)));
+        // // 抬起 SPACE 键
+        let lparam = (1 | (1 << 30) | (1 << 31)) as isize;
+        SendMessageW(genshin_hwnd, WM_KEYUP, WPARAM(VK_SPACE.0 as usize), LPARAM(lparam));
+    };
+    Ok(())
 }
 
 fn main() {
@@ -140,11 +151,16 @@ fn main() {
             println!("检测到选项，正在点击");
             click_dotdotdot(genshin_hwnd, point).unwrap();
         } else if match_enter().is_some() {
-            active_genshin_hwnd(genshin_hwnd);
+            unsafe { SetForegroundWindow(genshin_hwnd) };
             println!("剧情结束");
             break;
+        } else {
+            println!("按下 SPACE 键");
+            press_space(genshin_hwnd).unwrap();
         }
-        println!("等待 5 秒");
-        sleep(Duration::from_millis(5000));
+        // todo: 从配置读取
+        println!("等待 3 秒");
+        let mut rng = thread_rng();
+        sleep(Duration::from_millis(2500 + rng.gen_range(0..666)));
     }
 }
